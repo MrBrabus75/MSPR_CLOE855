@@ -1,0 +1,118 @@
+1. Sécurisation de votre Infrastructure Web
+1.1 - Sauvegarde automatique de la base de données database.db sur un serveur tiers
+
+    Script de sauvegarde automatique :
+        Créez un script Python ou Bash pour sauvegarder la base de données database.db et transférez-la vers un serveur tiers (par exemple, en utilisant rsync ou scp).
+        Utilisez cron pour automatiser l'exécution de ce script quotidiennement.
+#!/bin/bash
+# Backup script for database.db
+
+# Define variables
+DB_PATH="/path/to/database.db"
+BACKUP_DIR="/path/to/backup/"
+REMOTE_SERVER="user@remote_server:/path/to/remote/backup/"
+
+# Create a backup
+cp $DB_PATH $BACKUP_DIR/database_$(date +\%F).db
+
+# Transfer backup to remote server
+scp $BACKUP_DIR/database_$(date +\%F).db $REMOTE_SERVER
+
+
+2. Configuration Cron :
+
+    Ouvrez le crontab : crontab -e
+    Ajoutez la ligne suivante pour exécuter le script chaque jour à minuit :
+0 0 * * * /path/to/backup_script.sh
+
+
+1.2 - Contrôle d'accès pour suivre le trafic des connexions
+
+    Configuration de journaux d'accès :
+        Configurez le serveur web (par exemple, Apache ou Nginx) pour enregistrer les logs de connexion.
+# Nginx example
+log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                '$status $body_bytes_sent "$http_referer" '
+                '"$http_user_agent" "$http_x_forwarded_for"';
+access_log /var/log/nginx/access.log main;
+
+    Analyser les logs :
+        Utilisez des outils comme GoAccess, AWStats ou ELK Stack (Elasticsearch, Logstash, Kibana) pour analyser et suivre les logs.
+
+1.3 - Détection des menaces pour surveiller les activités suspectes
+
+    Utiliser un IDS/IPS :
+        Installez et configurez des systèmes de détection/prévention d'intrusions comme Snort, Suricata, ou utilisez des solutions cloud comme AWS GuardDuty.
+# Exemple d'installation de Suricata
+sudo apt-get update
+sudo apt-get install suricata
+sudo suricata-update
+sudo systemctl start suricata
+
+
+2. Sécurisation des Clés SSH
+2.1 - Gestion centralisée des clés SSH
+
+    Utiliser un gestionnaire de clés SSH :
+        Utilisez Vault de HashiCorp ou AWS Secrets Manager pour stocker et gérer les clés SSH.
+
+2.2 - Rotation régulière des clés SSH
+
+    Configurer la rotation des clés :
+        Définissez des politiques pour la rotation des clés SSH et utilisez des scripts pour automatiser cette rotation.
+# Script de rotation des clés SSH
+#!/bin/bash
+# Génération de nouvelle clé
+ssh-keygen -f ~/.ssh/id_rsa_new -N ""
+
+# Déploiement de la nouvelle clé sur les serveurs
+for server in `cat servers_list.txt`; do
+    ssh-copy-id -i ~/.ssh/id_rsa_new.pub $server
+done
+
+# Remplacer l'ancienne clé
+mv ~/.ssh/id_rsa_new ~/.ssh/id_rsa
+mv ~/.ssh/id_rsa_new.pub ~/.ssh/id_rsa.pub
+
+
+2.3 - Intégration de l'authentification à plusieurs facteurs (MFA)
+
+    Configurer MFA pour SSH :
+        Utilisez Google Authenticator ou des solutions comme Duo Security pour ajouter MFA aux connexions SSH.
+# Exemple d'installation de Google Authenticator
+sudo apt-get install libpam-google-authenticator
+google-authenticator
+
+# Modifier le fichier PAM pour inclure Google Authenticator
+echo "auth required pam_google_authenticator.so" | sudo tee -a /etc/pam.d/sshd
+
+
+3. Sécurisation de votre code
+3.1 - Utilisation de services de contrôle de code source
+
+    Intégration de services de contrôle de code source :
+        Utilisez des outils comme SonarQube, Codacy ou Snyk pour vérifier la qualité et la sécurité de votre code.
+# Exemple de configuration SonarQube dans un fichier CI/CD
+sonarqube:
+  image: sonarsource/sonar-scanner-cli
+  script:
+    - sonar-scanner -Dsonar.projectKey=my_project -Dsonar.sources=./src
+
+
+3.2 - Mise en place de pipelines CI/CD
+
+    Configuration des pipelines CI/CD :
+        Utilisez des outils comme Jenkins, GitLab CI, ou GitHub Actions pour automatiser les tests de vos API.
+# Exemple de fichier GitLab CI pour tests API
+stages:
+  - test
+
+test_api:
+  stage: test
+  script:
+    - pytest tests/
+
+
+
+
+
