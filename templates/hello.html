@@ -1,3 +1,20 @@
 <!doctype html>
-<title>Flask Server</title>
-<h1> Hello from Flask Server !</h1>
+<html lang="fr">
+<head>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+    <meta charset="UTF-8">
+    <title>Flask Server</title>
+</head>
+<body>
+    <h1>Hello from Flask Server!</h1>
+    <h2>Liste des URLs disponibles :</h2>
+    <ul>
+        <li><a href="/consultation/">Consultation</a></li>
+        <li><a href="/fiche_client/1">Fiche Client</a></li>
+        <li><a href="/authentification">Authentification</a></li>
+        <li><a href="/enregistrer_client">Enregistrer un client</a></li>
+        <li><a href="/fiche_nom">Recherche par nom</a></li>
+    </ul>
+    <p><a href="https://github.com/MrBrabus75/MSPR_CLOE855">Mon GitHub</a></p>
+</body>
+</html>
