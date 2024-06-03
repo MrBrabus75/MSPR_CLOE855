@@ -1,8 +1,19 @@
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session
 import sqlite3
+import logging
+from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
 app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'  # Clé secrète pour les sessions
+
+# Configurer le logging
+handler = RotatingFileHandler('access.log', maxBytes=10000, backupCount=1)
+handler.setLevel(logging.INFO)
+app.logger.addHandler(handler)
+
+@app.before_request
+def log_request_info():
+    app.logger.info("Accès à la route : %s, Méthode : %s, IP : %s", request.path, request.method, request.remote_addr)
 
 # Fonction pour vérifier si l'utilisateur est authentifié
 def est_authentifie():
@@ -36,6 +47,9 @@ def authentification():
 # Route pour la fiche client par ID
 @app.route('/fiche_client/<int:post_id>')
 def Readfiche(post_id):
+    if not est_authentifie():
+        return redirect(url_for('user_authentification'))
+
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM clients WHERE id = ?', (post_id,))
@@ -46,6 +60,9 @@ def Readfiche(post_id):
 # Route pour la consultation de la BDD
 @app.route('/consultation/')
 def ReadBDD():
+    if not est_authentifie():
+        return redirect(url_for('user_authentification'))
+
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM clients;')
@@ -56,11 +73,17 @@ def ReadBDD():
 # Formulaire pour enregistrer un client
 @app.route('/enregistrer_client', methods=['GET'])
 def formulaire_client():
+    if not est_authentifie():
+        return redirect(url_for('user_authentification'))
+
     return render_template('formulaire.html')
 
 # Enregistrer un client dans la BDD
 @app.route('/enregistrer_client', methods=['POST'])
 def enregistrer_client():
+    if not est_authentifie():
+        return redirect(url_for('user_authentification'))
+
     nom = request.form['nom']
     prenom = request.form['prenom']
     conn = sqlite3.connect('database.db')
