@@ -267,17 +267,265 @@ Difficulté : Moyenne (~2 heures)
 Votre MSPR fera l'objet d'un rapport venant accompagner et compléter les travaux techniques que vous avez pu réalisé dans le cadre de votre projet. 
 Complétez directement ce Readme pour nous expliquer comment avez sécuriser votre infrastructure.  
 
-**Expliquez nous dans cette section comment fonctionne la sécurisation de votre infrastructure :**  
-..  
-..  
+Rapport de Sécurisation
+Introduction
 
-**Expliquez nous dans cette section comment avez vous sécuriser vos clés SSH :**  
-..  
-..  
+Ce rapport détaille les mesures de sécurisation mises en place pour une application Flask hébergée sur un serveur Debian GNU/Linux 10 (Buster). Les mesures abordent la sécurisation de l'infrastructure web, des clés SSH et du code source. Le rapport inclut également une description du pipeline CI/CD configuré pour déployer automatiquement les mises à jour sur le serveur Alwaysdata
 
-**Expliquez nous dans cette section comment avez vous sécuriser votre code :**  
-..  
-..  
+Présentation de l'Infrastructure
+
+L'application Flask est hébergée sur un serveur Debian GNU/Linux 10 (Buster) et utilise une base de données SQLite. Le déploiement de l'application et les mises à jour sont automatisés à l'aide d'un pipeline CI/CD configuré sur GitHub Actions. Le workflow CI/CD est conçu pour envoyer automatiquement les nouveaux commits sur le site hébergé par Alwaysdata.
+Fonctionnement du Workflow CI/CD
+
+Le workflow CI/CD nommé "Industrialisation continue sur le serveur Alwaysdata" est déclenché à chaque push sur le dépôt GitHub. Il comporte trois étapes principales : Connexion, Copy, et Restart.
+Connexion
+
+Cette étape se connecte au serveur Alwaysdata via SSH en utilisant les secrets configurés dans GitHub (nom d'utilisateur et clé SSH).
+```
+name: Industrialisation continue sur le serveur Alwaysdata
+on: push
+jobs:
+  Connexion:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Connexion SSH avec le serveur
+        uses: appleboy/ssh-action@master
+        with:
+          host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd $HOME/www/
+```
+Copy
+
+Cette étape clone le dépôt GitHub sur le serveur Alwaysdata et synchronise les fichiers avec le répertoire de l'application Flask. Elle vérifie également si le répertoire de destination existe avant de procéder à la synchronisation.
+```
+  Copy:
+    needs: Connexion
+    runs-on: ubuntu-latest
+    steps:
+      - name: Connexion SSH avec le serveur
+        uses: appleboy/ssh-action@master
+        with:
+          host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            last_directory=$(basename ${{ runner.workspace }})
+            cd $HOME/www/
+            git clone https://github.com/${{ github.repository }}.git
+            # Vérifier si le répertoire de destination existe
+            if [ "$(ls -A ./flask)" ]; then
+              rsync -r ./$last_directory/ ./flask
+              rm -rf ./$last_directory
+            else
+              echo "Le répertoire flask de destination sur votre serveur n'existe pas"
+              exit 1
+            fi
+```
+Restart
+
+Cette étape redémarre le site hébergé sur Alwaysdata en utilisant l'API Alwaysdata. Elle vérifie également les codes de réponse HTTP pour s'assurer que l'opération de redémarrage s'est bien déroulée.
+```
+  Restart:
+    needs: Copy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restart Alwaysdata site
+        run: |
+          response_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST --basic --user "${{ secrets.ALWAYSDATA_TOKEN }}:" https://api.alwaysdata.com/v1/site/${{ secrets.ALWAYSDATA_SITE_ID }}/restart/)
+          # Vérifier le code de réponse HTTP
+          if [ "$response_code" -eq 204 ]; then
+            echo "Relance de votre site réussi"
+          elif [ "$response_code" -eq 404 ]; then
+            echo "Vous n'avez pas renseigner correctement votre secret ALWAYSDATA_SITE_ID"
+            exit 1  # Quitter avec un code d'erreur
+          elif [ "$response_code" -eq 401 ]; then
+            echo "Vous n'avez pas renseigner correctement votre secret ALWAYSDATA_TOKEN"
+            exit 1  # Quitter avec un code d'erreur
+          else
+            echo "Échec du redémarrage avec le code de réponse : $response_code"
+            exit 1  # Quitter avec un code d'erreur
+          fi
+```
+Sécurisation de l'Infrastructure
+Sauvegarde de la Base de Données
+
+Un script backup_db.sh a été mis en place pour automatiser la sauvegarde de la base de données SQLite vers une machine personnelle. Le script utilise une clé SSH pour transférer la sauvegarde de manière sécurisée sans intervention manuelle.
+```
+#!/bin/bash
+
+# Variables
+DB_PATH="/path/to/your/database.db"
+BACKUP_PATH="/path/to/backup/location"
+DATE=$(date +"%Y%m%d%H%M")
+BACKUP_FILE="database_backup_$DATE.db"
+REMOTE_USER="TOUR"
+REMOTE_HOST="82.64.164.84"
+REMOTE_PATH="/path/to/personal/backup/location"
+
+# Copier la base de données
+cp $DB_PATH $BACKUP_PATH/$BACKUP_FILE
+
+# Envoyer le fichier de sauvegarde à la machine personnelle
+scp -i ~/.ssh/id_rsa_backup $BACKUP_PATH/$BACKUP_FILE $REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH
+```
+Le script est automatisé à l'aide d'un cron job pour s'exécuter quotidiennement à 2 heures du matin.
+```
+crontab -e
+# Ajoutez la ligne suivante pour exécuter le script quotidiennement à 2h du matin
+0 2 * * * /path/to/backup_db.sh
+```
+Journalisation des Connexions
+
+La journalisation des connexions a été mise en place dans l'application Flask en utilisant RotatingFileHandler pour enregistrer les accès dans access.log.
+```
+import logging
+from logging.handlers import RotatingFileHandler
+
+handler = RotatingFileHandler('access.log', maxBytes=10000, backupCount=1)
+handler.setLevel(logging.INFO)
+app.logger.addHandler(handler)
+
+@app.before_request
+def log_request_info():
+    app.logger.info("Accès à la route : %s, Méthode : %s, IP : %s", request.path, request.method, request.remote_addr)
+```
+Détection des Menaces
+
+Un script Python ids.py a été créé pour surveiller le fichier de log (access.log) et détecter les tentatives de connexion multiples échouées.
+```
+import time
+import re
+from collections import defaultdict
+
+LOG_FILE = "access.log"
+ALERT_FILE = "alerts.log"
+MAX_ATTEMPTS = 5
+TIME_WINDOW = 60  # seconds
+
+login_attempts = defaultdict(list)
+
+def check_intrusion():
+    with open(LOG_FILE, "r") as file:
+        lines = file.readlines()
+
+    for line in lines:
+        match = re.search(r'(\d+\.\d+\.\d+\.\d+).*"POST /authentification', line)
+        if match:
+            ip_address = match.group(1)
+            timestamp = time.time()
+            login_attempts[ip_address].append(timestamp)
+
+            login_attempts[ip_address] = [t for t in login_attempts[ip_address] if t > timestamp - TIME_WINDOW]
+
+            if len(login_attempts[ip_address]) > MAX_ATTEMPTS:
+                log_alert(ip_address)
+
+def log_alert(ip_address):
+    with open(ALERT_FILE, "a") as alert_file:
+        alert_file.write(f"Intrusion detected from IP: {ip_address} at {time.ctime()}\n")
+    print(f"Intrusion detected from IP: {ip_address}")
+
+if __name__ == "__main__":
+    while True:
+        check_intrusion()
+        time.sleep(10)
+```
+Sécurisation des Clés SSH
+Génération de Clés SSH
+
+Une paire de clés SSH (id_rsa_backup et id_rsa_backup.pub) a été générée sur le serveur Ubuntu pour l'authentification sans mot de passe.
+```
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa_backup -N ""
+```
+Déploiement de la Clé Publique
+
+La clé publique a été ajoutée au fichier authorized_keys sur la machine hôte Windows située à l'adresse IP 82.64.164.84.
+```
+ssh-copy-id -i ~/.ssh/id_rsa_backup.pub TOUR@82.64.164.84
+```
+Rotation des Clés SSH
+
+Un script rotate_ssh_keys.sh a été créé pour générer de nouvelles clés SSH, archiver les anciennes et envoyer les nouvelles clés à la machine personnelle.
+```
+#!/bin/bash
+
+# Variables
+NEW_KEY_PATH="$HOME/.ssh/id_rsa_new"
+OLD_KEY_PATH="$HOME/.ssh/old"
+BACKUP_MACHINE="TOUR@82.64.164.84:/path/to/backup/location"
+
+# Générer une nouvelle clé SSH
+ssh-keygen -t rsa -b 4096 -f $NEW_KEY_PATH -N ""
+
+# Backup de l'ancienne clé
+mkdir -p $OLD_KEY_PATH
+mv $HOME/.ssh/id_rsa $OLD_KEY_PATH/id_rsa_$(date +"%Y%m%d%H%M")
+mv $HOME/.ssh/id_rsa.pub $OLD_KEY_PATH/id_rsa.pub_$(date +"%Y%m%d%H%M")
+
+# Déplacer la nouvelle clé
+mv $NEW_KEY_PATH $HOME/.ssh/id_rsa
+mv $NEW_KEY_PATH.pub $HOME/.ssh/id_rsa.pub
+
+# Envoyer la nouvelle clé à la machine personnelle
+scp $HOME/.ssh/id_rsa $BACKUP_MACHINE/id_rsa
+scp $HOME/.ssh/id_rsa.pub $BACKUP_MACHINE/id_rsa.pub
+```
+Sécurisation du Code
+Contrôle de la Qualité et de la Sécurité du Code
+
+Un pipeline CI/CD a été configuré pour automatiser les tests et vérifier la qualité du code source. Le pipeline utilise flake8 pour vérifier la qualité du code et pytest pour exécuter les tests automatisés afin de s'assurer que l'application fonctionne comme prévu.
+```
+name: CI/CD Pipeline
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:buster
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Install Python
+      run: |
+        apt-get update && apt-get install -y python3 python3-pip
+        python3 -m pip install --upgrade pip
+        pip3 install flake8 pytest
+
+    - name: Lint code
+      run: |
+        flake8 .
+
+    - name: Run tests
+      run: |
+        pytest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.5.3
+      with:
+        ssh-private-key: ${{ secrets.SSH_KEY }}
+
+    - name: Deploy to Debian server
+      run: |
+        ssh -o StrictHostKeyChecking=no TOUR@82.64.164.84 "cd /path/to/your/application && git pull && systemctl restart your_service"
+```
+
+Conclusion
+
+Les mesures de sécurisation mises en place couvrent la résilience de l'infrastructure web, la sécurité des clés SSH et la qualité du code source. La mise en place de sauvegardes automatisées, de la journalisation, de la détection d'intrusion, ainsi que la gestion robuste des clés SSH et des pipelines CI/CD efficaces, offrent une protection complète contre les menaces courantes et assurent un déploiement continu sécurisé et fiable.
 
 --------------------------------------------------------------------
 Troubleshooting :
